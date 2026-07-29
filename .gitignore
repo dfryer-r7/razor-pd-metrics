@@ -1,0 +1,11 @@
+# secrets / local config
+.env
+.claude/
+
+# python envs & caches
+.venv/
+__pycache__/
+*.pyc
+
+# generated report artifacts — never commit these
+reports/
