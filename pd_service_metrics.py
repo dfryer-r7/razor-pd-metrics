@@ -455,13 +455,18 @@ def trend_chart_b64(weekly: pd.DataFrame) -> str:
 
 
 def daily_trend_chart_b64(daily: pd.DataFrame) -> str:
-    """Render a daily per-service line chart to a base64-encoded PNG."""
+    """Render a daily per-service line chart to a base64-encoded PNG.
+
+    Days with zero total alerts (across ALL_SERVICES, or summed across
+    columns if that's absent) are shaded and marked on the x-axis.
+    """
     import base64
     import io
 
     import matplotlib
 
     matplotlib.use("Agg")
+    import matplotlib.patches as mpatches
     import matplotlib.pyplot as plt
 
     fig, ax = plt.subplots(figsize=(9, 4), dpi=110)
@@ -476,9 +481,32 @@ def daily_trend_chart_b64(daily: pd.DataFrame) -> str:
             linestyle="--",
             label="ALL",
         )
+
+    totals = daily["ALL_SERVICES"] if "ALL_SERVICES" in daily.columns else daily.sum(axis=1)
+    quiet_days = totals[totals == 0].index
+    if len(quiet_days):
+        half_day = pd.Timedelta(hours=12)
+        for day in quiet_days:
+            ax.axvspan(day - half_day, day + half_day, color="#27ae60", alpha=0.15, zorder=0)
+        ax.scatter(
+            quiet_days,
+            [0] * len(quiet_days),
+            marker="v",
+            color="#27ae60",
+            s=25,
+            zorder=3,
+        )
+        quiet_handle = mpatches.Patch(color="#27ae60", alpha=0.4, label=f"no alerts ({len(quiet_days)}d)")
+    else:
+        quiet_handle = None
+
     ax.set_ylabel("incidents / day")
     ax.set_xlabel("day")
-    ax.legend(fontsize=7, ncol=2)
+    handles, labels = ax.get_legend_handles_labels()
+    if quiet_handle is not None:
+        handles.append(quiet_handle)
+        labels.append(quiet_handle.get_label())
+    ax.legend(handles, labels, fontsize=7, ncol=2)
     ax.grid(True, alpha=0.3)
     fig.autofmt_xdate()
     fig.tight_layout()
