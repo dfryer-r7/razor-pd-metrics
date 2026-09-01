@@ -42,6 +42,7 @@ from zoneinfo import ZoneInfo
 
 import matplotlib
 matplotlib.use("Agg")
+import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import pandas as pd
 import requests
@@ -484,6 +485,56 @@ def weekly_trend_png(df: pd.DataFrame) -> str:
     return base64.b64encode(buf.getvalue()).decode("ascii")
 
 
+def daily_volume_png(df: pd.DataFrame, window_start: pd.Timestamp, window_end: pd.Timestamp) -> str:
+    """Daily alert volume, working vs off-hours, as a stacked bar with quiet-day markers.
+
+    Reindexed against the full [window_start, window_end] day range (not just
+    dates present in df) so days with zero alerts anywhere in the window show
+    up as gaps rather than being silently dropped.
+    """
+    ts_series = df["ts"].dt.tz_convert("UTC")
+    df2 = pd.DataFrame({"date": ts_series.dt.floor("D"), "hour_type": df["hour_type"].values})
+    daily = df2.groupby(["date", "hour_type"]).size().unstack(fill_value=0)
+
+    full_range = pd.date_range(window_start.floor("D"), window_end.floor("D"), freq="D", tz="UTC")
+    daily = daily.reindex(full_range, fill_value=0)
+    if "working" not in daily.columns:
+        daily["working"] = 0
+    if "off-hours" not in daily.columns:
+        daily["off-hours"] = 0
+
+    totals = daily["working"] + daily["off-hours"]
+    quiet_days = totals[totals == 0].index
+
+    fig, ax = plt.subplots(figsize=(9, 4), dpi=110)
+    ax.bar(daily.index, daily["working"], width=0.8, label="Working hours", color="#27ae60")
+    ax.bar(daily.index, daily["off-hours"], width=0.8, bottom=daily["working"],
+           label="Off-hours", color="#c0392b")
+
+    if len(quiet_days):
+        half_day = pd.Timedelta(hours=12)
+        for day in quiet_days:
+            ax.axvspan(day - half_day, day + half_day, color="#5b9bd5", alpha=0.15, zorder=0)
+        ax.scatter(quiet_days, [0] * len(quiet_days), marker="v", color="#5b9bd5", s=25, zorder=3)
+
+    ax.set_ylabel("alerts / day")
+    ax.set_xlabel("day")
+    handles, labels = ax.get_legend_handles_labels()
+    if len(quiet_days):
+        quiet_handle = mpatches.Patch(color="#5b9bd5", alpha=0.4, label=f"no alerts ({len(quiet_days)}d)")
+        handles.append(quiet_handle)
+        labels.append(quiet_handle.get_label())
+    ax.legend(handles, labels, fontsize=8)
+    ax.grid(True, axis="y", alpha=0.3)
+    fig.autofmt_xdate()
+    fig.tight_layout()
+
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png")
+    plt.close(fig)
+    return base64.b64encode(buf.getvalue()).decode("ascii")
+
+
 def top_off_hours_alerts_png(df: pd.DataFrame, top_n: int = 15) -> str:
     """Horizontal bar chart: top N services by off-hours alert count, stacked working/off."""
     svc_counts = (
@@ -529,7 +580,13 @@ def _color_off_pct(v: object) -> str:
     return "color:#27ae60" if v < 30 else "color:#999"  # type: ignore[operator]
 
 
-def _render_period(summary: pd.DataFrame, df: pd.DataFrame, tz_name: str) -> str:
+def _render_period(
+    summary: pd.DataFrame,
+    df: pd.DataFrame,
+    tz_name: str,
+    window_start: pd.Timestamp,
+    window_end: pd.Timestamp,
+) -> str:
     """Render the HTML content for one time-window panel (no outer wrapper)."""
     parts: list[str] = []
 
@@ -575,6 +632,17 @@ def _render_period(summary: pd.DataFrame, df: pd.DataFrame, tz_name: str) -> str
     except Exception as exc:
         parts.append(f"<p class='meta'>Chart unavailable: {exc}</p>")
 
+    # Daily volume, working vs off-hours, with quiet-day markers
+    parts.append("<h2>Daily alert volume — working vs off-hours</h2>")
+    parts.append(
+        "<p class='meta'>Blue-shaded days (▽) had zero alerts across all services in this window.</p>"
+    )
+    try:
+        b64 = daily_volume_png(df, window_start, window_end)
+        parts.append(f"<img alt='daily alert volume' src='data:image/png;base64,{b64}'/>")
+    except Exception as exc:
+        parts.append(f"<p class='meta'>Chart unavailable: {exc}</p>")
+
     # Heatmap
     parts.append("<h2>Alert density heatmap — day of week × hour of day</h2>")
     parts.append(f"<p class='meta'>All times in assignee's local timezone; falls back to {tz_name}. Darker = more alerts.</p>")
@@ -596,20 +664,20 @@ def _render_period(summary: pd.DataFrame, df: pd.DataFrame, tz_name: str) -> str
 
 
 def write_html(
-    periods: list[tuple[str, pd.DataFrame, pd.DataFrame]],
+    periods: list[tuple[str, pd.DataFrame, pd.DataFrame, pd.Timestamp, pd.Timestamp]],
     meta: dict,
     out_path: Path,
 ) -> None:
     """Render a self-contained HTML report with a time-window dropdown.
 
-    periods: list of (label, summary_df, enriched_df), one per time window.
-    The first entry is shown by default.
+    periods: list of (label, summary_df, enriched_df, window_start, window_end),
+    one per time window. The first entry is shown by default.
     """
     tz_name = meta["tz"]
 
     opts_html = "".join(
         f"<option value='panel-{i}'{' selected' if i == 0 else ''}>{label}</option>"
-        for i, (label, _, _) in enumerate(periods)
+        for i, (label, _, _, _, _) in enumerate(periods)
     )
     select_js = (
         "var sel=this.value;"
@@ -641,10 +709,10 @@ def write_html(
         "</div>",
     ]
 
-    for i, (label, summary, df) in enumerate(periods):
+    for i, (label, summary, df, window_start, window_end) in enumerate(periods):
         display = "" if i == 0 else "display:none"
         parts.append(f"<div id='panel-{i}' class='period-panel' style='{display}'>")
-        parts.append(_render_period(summary, df, tz_name))
+        parts.append(_render_period(summary, df, tz_name, window_start, window_end))
         parts.append("</div>")
 
     parts.append("</body></html>")
@@ -758,7 +826,7 @@ def main() -> None:
     df_full = enrich(raw, s, tz, args.work_start, args.work_end)
 
     # Slice each time window from the already-enriched full dataframe.
-    periods: list[tuple[str, pd.DataFrame, pd.DataFrame]] = []
+    periods: list[tuple[str, pd.DataFrame, pd.DataFrame, pd.Timestamp, pd.Timestamp]] = []
     for label, days in WINDOWS:
         if days > fetch_days:
             continue
@@ -773,7 +841,7 @@ def main() -> None:
             f"· {len(summary_w)} services",
             file=sys.stderr,
         )
-        periods.append((label, summary_w, df_w))
+        periods.append((label, summary_w, df_w, pd.Timestamp(cutoff), pd.Timestamp(end)))
 
     # Resolve output paths: place under --outdir (created if missing), then
     # append a run-date stamp unless --no-timestamp. An absolute --csv/--html
