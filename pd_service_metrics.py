@@ -454,41 +454,6 @@ def trend_chart_b64(weekly: pd.DataFrame) -> str:
 
 
 
-def daily_trend_chart_b64(daily: pd.DataFrame) -> str:
-    """Render a daily per-service line chart to a base64-encoded PNG."""
-    import base64
-    import io
-
-    import matplotlib
-
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-
-    fig, ax = plt.subplots(figsize=(9, 4), dpi=110)
-    for col in [c for c in daily.columns if c != "ALL_SERVICES"]:
-        ax.plot(daily.index, daily[col], marker="o", markersize=2.5, linewidth=1, label=col)
-    if "ALL_SERVICES" in daily.columns:
-        ax.plot(
-            daily.index,
-            daily["ALL_SERVICES"],
-            color="#333",
-            linewidth=2,
-            linestyle="--",
-            label="ALL",
-        )
-    ax.set_ylabel("incidents / day")
-    ax.set_xlabel("day")
-    ax.legend(fontsize=7, ncol=2)
-    ax.grid(True, alpha=0.3)
-    fig.autofmt_xdate()
-    fig.tight_layout()
-
-    buf = io.BytesIO()
-    fig.savefig(buf, format="png")
-    plt.close(fig)
-    return base64.b64encode(buf.getvalue()).decode("ascii")
-
-
 def write_html(
     rollup: pd.DataFrame,
     daily: pd.DataFrame,
@@ -740,15 +705,6 @@ def write_html(
                 parts.append(f"<img alt='weekly episode trend' src='data:image/png;base64,{b64}'/>")
             except Exception as exc:
                 parts.append(f"<p class='meta'>Chart unavailable: {exc}</p>")
-
-        # --- Embedded daily alert volume chart (last 90d) ---
-        last90 = daily_dt.loc[daily_dt.index >= (daily_dt.index.max() - pd.Timedelta(days=89))]
-        parts.append("<h2>Daily alert volume (last 90d)</h2>")
-        try:
-            b64 = daily_trend_chart_b64(last90)
-            parts.append(f"<img alt='daily alert volume, last 90 days' src='data:image/png;base64,{b64}'/>")
-        except Exception as exc:
-            parts.append(f"<p class='meta'>Chart unavailable: {exc}</p>")
 
         # --- Embedded weekly raw incident trend chart ---
         parts.append("<h2>Weekly incident trend (raw)</h2>")
