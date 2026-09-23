@@ -68,7 +68,16 @@ uv run pd_alert_report.py --days 30 --tz America/New_York
 
 # Override which services to report on
 uv run pd_service_metrics.py --days 90 --service PZZG5VN,P27C0CY
+
+# Arbitrary past window: last quarter (92d window ending 2026-06-23)
+uv run pd_service_metrics.py --days 92 --end 2026-06-23
+uv run pd_alert_report.py --days 92 --end 2026-06-23
 ```
+
+`--days` is a lookback window; it defaults to ending now, but `--end YYYY-MM-DD`
+shifts that end date into the past — combine the two to pull an arbitrary
+historical window (e.g. a prior quarter) for side-by-side comparison against
+a current-window run.
 
 Pass `--help` to either script for the full flag list.
 
@@ -91,7 +100,8 @@ reports/
 - Change the output directory with `--outdir DIR`.
 - Pass `--no-timestamp` for fixed filenames that overwrite prior runs.
 
-**Report artifacts are never committed** — `reports/` is git-ignored. Share the
+**Report artifacts are never committed** — `reports/` (and any other output
+directory, e.g. `quarterly_reports/` from `--outdir`) is git-ignored. Share the
 HTML files by sending the file directly; they're fully self-contained.
 
 ## Notes

@@ -9,3 +9,4 @@ __pycache__/
 
 # generated report artifacts — never commit these
 reports/
+quarterly_reports/

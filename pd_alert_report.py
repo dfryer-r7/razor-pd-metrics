@@ -727,6 +727,9 @@ def main() -> None:
     )
     ap.add_argument("--days", type=int, default=91,
                     help="max lookback window in days (default 91; covers all four presets)")
+    ap.add_argument("--end", metavar="YYYY-MM-DD",
+                    help="end of the lookback window (default: now). Combine with --days to "
+                    "fetch an arbitrary past window, e.g. --end 2026-06-23 --days 92 for a past quarter")
     ap.add_argument(
         "--service",
         dest="services",
@@ -789,7 +792,13 @@ def main() -> None:
     WINDOWS: list[tuple[str, int]] = [("1 week", 7), ("2 weeks", 14), ("1 month", 30), ("3 months", 91)]
     fetch_days = max(days for _, days in WINDOWS if days <= args.days) if args.days < 91 else 91
 
-    end = datetime.now(timezone.utc).replace(microsecond=0)
+    if args.end:
+        try:
+            end = datetime.strptime(args.end, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        except ValueError:
+            sys.exit(f"Invalid --end date: {args.end!r}. Use YYYY-MM-DD.")
+    else:
+        end = datetime.now(timezone.utc).replace(microsecond=0)
     start = end - timedelta(days=fetch_days)
     start_iso, end_iso = start.isoformat(), end.isoformat()
     print(f"Fetching {fetch_days}d window: {start_iso} -> {end_iso}", file=sys.stderr)

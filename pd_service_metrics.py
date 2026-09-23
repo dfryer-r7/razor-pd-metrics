@@ -730,6 +730,9 @@ def write_html(
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--days", type=int, default=90, help="lookback window (default 90)")
+    ap.add_argument("--end", metavar="YYYY-MM-DD",
+                    help="end of the lookback window (default: now). Combine with --days to "
+                    "fetch an arbitrary past window, e.g. --end 2026-06-23 --days 92 for a past quarter")
     ap.add_argument(
         "--service",
         dest="services",
@@ -778,7 +781,13 @@ def main() -> None:
         print(list_services(s).to_string(index=False))
         return
 
-    end = datetime.now(timezone.utc).replace(microsecond=0)
+    if args.end:
+        try:
+            end = datetime.strptime(args.end, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        except ValueError:
+            sys.exit(f"Invalid --end date: {args.end!r}. Use YYYY-MM-DD.")
+    else:
+        end = datetime.now(timezone.utc).replace(microsecond=0)
     start = end - timedelta(days=args.days)
     start_iso, end_iso = start.isoformat(), end.isoformat()
     print(f"Window: {start_iso} -> {end_iso}", file=sys.stderr)
